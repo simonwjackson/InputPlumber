@@ -608,26 +608,21 @@ impl CompositeDeviceConfig {
     pub fn has_matching_udev(&self, device: &UdevDevice, udev_config: &Udev) -> bool {
         log::debug!("Checking udev config '{:?}'", udev_config);
 
+        // Reject cheap identity mismatches before touching sysfs. Reading every
+        // attribute on every ancestor can perform slow hardware I/O (USB, PMIC).
+        if let Some(subsystem) = udev_config.subsystem.as_ref() {
+            if !glob_match(subsystem, &device.subsystem()) {
+                return false;
+            }
+        }
+        if let Some(sys_name) = udev_config.sys_name.as_ref() {
+            if !glob_match(sys_name, &device.sysname()) {
+                return false;
+            }
+        }
         if let Some(attributes) = udev_config.attributes.as_ref() {
-            let device_attributes = device.get_attributes();
-
-            for attribute in attributes {
-                let Some(device_attr_value) = device_attributes.get(&attribute.name) else {
-                    // If the device does not have this attribute, return false
-                    return false;
-                };
-
-                // If no value was specified in the config, then only match on
-                // the presence of the attribute and not the value.
-                let Some(attr_value) = attribute.value.as_ref() else {
-                    continue;
-                };
-
-                // Glob match on the attribute value
-                log::debug!("Checking attribute: {attr_value} against {device_attr_value}");
-                if !glob_match(attr_value.as_str(), device_attr_value.as_str()) {
-                    return false;
-                }
+            if !has_matching_attributes(attributes, |name| device.attribute_value_from_tree(name)) {
+                return false;
             }
         }
 
@@ -684,22 +679,6 @@ impl CompositeDeviceConfig {
                 if !glob_match(prop_value.as_str(), device_prop_value.as_str()) {
                     return false;
                 }
-            }
-        }
-
-        if let Some(subsystem) = udev_config.subsystem.as_ref() {
-            let device_subsystem = device.subsystem();
-            log::debug!("Checking subsystem: {subsystem} against {device_subsystem}");
-            if !glob_match(subsystem.as_str(), device_subsystem.as_str()) {
-                return false;
-            }
-        }
-
-        if let Some(sys_name) = udev_config.sys_name.as_ref() {
-            let device_sys_name = device.sysname();
-            log::debug!("Checking sys_name: {sys_name} against {device_sys_name}");
-            if !glob_match(sys_name.as_str(), device_sys_name.as_str()) {
-                return false;
             }
         }
 
@@ -1159,4 +1138,20 @@ impl CompositeDeviceConfig {
 
         Some(matches)
     }
+}
+
+// Query only attributes named by this matcher, stopping at the first mismatch.
+fn has_matching_attributes(
+    attributes: &[UdevAttribute],
+    mut lookup: impl FnMut(&str) -> Option<String>,
+) -> bool {
+    attributes.iter().all(|attribute| {
+        let Some(value) = lookup(&attribute.name) else {
+            return false;
+        };
+        attribute
+            .value
+            .as_ref()
+            .is_none_or(|pattern| glob_match(pattern, &value))
+    })
 }

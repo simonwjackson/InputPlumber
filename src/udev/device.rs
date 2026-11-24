@@ -26,6 +26,7 @@ pub trait AttributeGetter {
     fn product(&self) -> String;
     fn serial_number(&self) -> String;
     fn uniq(&self) -> String;
+    #[allow(dead_code)]
     fn get_attributes(&self) -> HashMap<String, String>;
     /// Returns the value of the given property from the device
     #[allow(dead_code)]
@@ -641,11 +642,24 @@ impl UdevDevice {
     }
 
     /// Recursively gets attributes for this device and all parent devices.
+    #[allow(dead_code)]
     pub fn get_attributes(&self) -> HashMap<String, String> {
         let Ok(device) = self.get_device() else {
             return HashMap::new();
         };
         device.get_attributes()
+    }
+
+    /// Read only the named attribute, using the nearest ancestor's value.
+    /// Unlike get_attribute_from_tree, preserve empty-but-present attributes.
+    pub fn attribute_value_from_tree(&self, attribute: &str) -> Option<String> {
+        let mut device = self.get_device().ok()?;
+        loop {
+            if let Some(value) = device.attribute_value(attribute) {
+                return Some(value.to_string_lossy().into_owned());
+            }
+            device = device.parent()?;
+        }
     }
 
     /// Gets an attribute from the first device in the device tree to match the attribute.

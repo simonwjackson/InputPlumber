@@ -7,7 +7,7 @@ use std::{
 use glob_match::glob_match;
 use tokio::fs;
 
-use crate::config::CompositeDeviceConfig;
+use crate::config::{has_matching_attributes, CompositeDeviceConfig, UdevAttribute};
 
 const AUTOSTART_HWDB_FILE: &str = "./rootfs/usr/lib/udev/hwdb.d/60-inputplumber-autostart.hwdb";
 const DEVICE_CONFIG_DIR: &str = "./rootfs/usr/share/inputplumber/devices";
@@ -144,4 +144,64 @@ async fn check_autostart_rules() -> Result<(), Box<dyn Error>> {
     assert_eq!(failures.len(), 0);
 
     Ok(())
+}
+
+fn attribute(name: &str, value: Option<&str>) -> UdevAttribute {
+    UdevAttribute {
+        name: name.into(),
+        value: value.map(str::to_owned),
+    }
+}
+
+#[test]
+fn matching_reads_only_requested_attributes_and_short_circuits() {
+    let attributes = [
+        attribute("id/vendor", Some("1532")),
+        attribute("id/product", Some("0712")),
+    ];
+    let mut reads = Vec::new();
+    assert!(!has_matching_attributes(&attributes, |name| {
+        reads.push(name.to_owned());
+        Some("045e".into())
+    }));
+    assert_eq!(reads, ["id/vendor"]);
+    let mut reads = Vec::new();
+    assert!(has_matching_attributes(&attributes, |name| {
+        reads.push(name.to_owned());
+        Some(
+            match name {
+                "id/vendor" => "1532",
+                "id/product" => "0712",
+                _ => panic!("unrequested sysfs read"),
+            }
+            .into(),
+        )
+    }));
+    assert_eq!(reads, ["id/vendor", "id/product"]);
+}
+
+#[test]
+fn matching_preserves_globs_presence_missing_and_empty_values() {
+    assert!(has_matching_attributes(
+        &[attribute("name", Some("Razer*"))],
+        |_| Some("Razer Kishi V2".into())
+    ));
+    assert!(!has_matching_attributes(
+        &[attribute("name", Some("Razer*"))],
+        |_| Some("Xbox".into())
+    ));
+    assert!(!has_matching_attributes(
+        &[attribute("missing", None)],
+        |_| None
+    ));
+    assert!(has_matching_attributes(&[attribute("empty", None)], |_| {
+        Some(String::new())
+    }));
+    assert!(has_matching_attributes(
+        &[attribute("empty", Some(""))],
+        |_| Some(String::new())
+    ));
+    assert!(has_matching_attributes(&[], |_| panic!(
+        "no attributes requested"
+    )));
 }

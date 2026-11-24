@@ -1,3 +1,5 @@
+> [!IMPORTANT]
+> Remove this line to confirm you've reviewed this PR before submitting.
 <h1 align="center">
   <img src="https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/icon.svg" alt="InputPlumber Logo" width="200">
   <br>
